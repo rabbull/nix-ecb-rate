@@ -1,0 +1,2 @@
+XML: https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml
+CSV (zipped): https://www.ecb.europa.eu/stats/eurofxref/eurofxref.zip
