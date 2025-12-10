@@ -9,29 +9,19 @@ backgroundImage: url('https://marp.app/assets/hero-background.svg')
 # Daily ECB FX Converter
 ## Pure Nix & Reproducible Data Processing
 
-karl
+Zisen Liu
 
 ---
 
-# Why Nix?
+# Structure
 
-- **Hermetic Builds**: No access to `/bin`, network, or user environment during build.
-- **Strict Reproducibility**: Input hash pinning ensures identical results every time.
-- **Pure Evaluation**: XML parsing happens at *eval time*, implying zero runtime overhead.
-- **Zero Runtime Deps**: The final output depends only on standard POSIX shell.
-
----
-
-# Architecture
-
-1.  **Input**: Daily XML feed from European Central Bank (ECB).
-2.  **Fetch**: Securely download with `fetchurl` (pinned SRI hash).
-3.  **Parse**: Extract rates using **Pure Nix** (no external parsers).
-4.  **Expose**: Provide results via `lib` (Nix API) and `apps` (CLI).
+1. `default.nix`: Serves as the library.
+2. `flake.nix`: The flake metadata. Serves as a wrapper for the library.
+3. `xml/`: The XML parser written in pure Nix.
 
 ---
 
-# Purity & External Data
+# Purity vs. External Data
 
 **The Challenge**: Nix evaluation is "pure"—it cannot access the internet or mutable files.
 
@@ -53,26 +43,6 @@ xmlContent = builtins.readFile source;
 1.  **Promise**: We tell Nix exactly what the file's hash **will** be.
 2.  **Verify**: Nix downloads the file. If the hash matches, it's saved to the Nix Store.
 3.  **Use**: Since the hash is known, the file is effectively "constant" and "pure."
-
----
-
-# Deep Dive: Pure XML Parsing
-
-We parse XML **inside** the Nix evaluator using `nix-parsec`.
-
-- **Benefit**: No *Import From Derivation* (IFD).
-- **Result**: The "build" is just text processing in memory.
-
-```nix
-# xml/parse-xml.nix usage in default.nix
-let
-  xmlParser = import (xmlDir + "/parse-xml.nix") { inherit pkgs; };
-  parsed = xmlParser.parseXml xmlContent;
-  # ... recursive tag finding ...
-in
-  # Returns a usable Nix attribute set of rates
-  { USD = 1.05; CHF = 0.94; ... }
-```
 
 ---
 
@@ -98,31 +68,15 @@ rates.lib.convert { amount = 50; from = "EUR"; to = "GBP"; }
 
 # Challenges
 
-- **XML Parsing**: Nix is not meant for complex text processing. Writing `parse-xml.nix` with `nix-parsec` was the hardest part.
-- **Purity Constraints**: Cannot just "download and read"—must use strict hash pinning.
-
----
-
-# Reflections on Nix
-
-- **Steep Learning Curve**: Functional paradigm + lazy evaluation + dynamic typing = confusing errors.
-- **Powerful Abstraction**: Once it works, it works *forever* and *everywhere*.
-- **Data as Code**: Treating data sources as versioned inputs is a paradigm shift.
+- **Nix**: Nix itself is challenging to learn, and it's not always easy to find the right tools.
+- **XML Parsing**: Nix is not meant for complex text processing. Writing `parse-xml.nix` with `nix-parsec` was the most time-consuming part.
+- **Purity Constraints**: Cannot just "download and read"; must use strict hash pinning.
 
 ---
 
 # Recommendations
 
+- **Only for Building**: Nix is not a general-purpose programming language. It's best used for building software.
+- **Purity**: The way Nix ensures purity is unique and may be inspiring for other languages.
 - **Use Flakes**: It simplifies dependency management significantly.
-- **Master `nix repl`**: Essential for debugging expressions.
-- **Avoid Pure Parsing**: For real work, use `runCommand` with tools like `jq` or `xml2json`. We did this strictly for the demo.
-
----
-
-# Summary
-
-- **Hermetic**: Zero access to the outside world during build.
-- **Composable**: Use as a CLI tool or a Nix library function.
-- **Educational**: Demonstrates Flakes, Fixed-Output Derivations, and pure parsing.
-
-**Thank You!**
+- **Combine with Other Languages or Tools**: Implement the complexity (e.g. XML parsing) with other general-purpose languages, and use Nix only for the reproducibility.
