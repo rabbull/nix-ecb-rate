@@ -2,9 +2,9 @@ let
   mkEnv =
     { pkgs ? import <nixpkgs> {}
     , src ? builtins.path { path = ./.; name = "ecb-fx-src"; }
-    , expectedDate ? "2025-12-05"
+    , expectedDate ? "2025-12-09"
     , ratesUrl ? "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
-    , ratesHash ? "sha256-qDIKv7rg+naM0pfZghEsE56e+g0CjNNt51M5ObhGAb4="
+    , ratesHash ? "sha256-HaGm7DIZU+xfSMlZoTZCk0wY9ZCkJF9+t22LGB57zF0="
     }:
     let
       xmlDir = src + "/xml";
@@ -56,7 +56,8 @@ let
         currencyNodes);
 
       rateFor = currency:
-        if builtins.hasAttr currency ratesAttr
+        if currency == "EUR" then 1.0
+        else if builtins.hasAttr currency ratesAttr
         then builtins.getAttr currency ratesAttr
         else throw "Currency ${currency} not found in ECB data";
 
@@ -79,6 +80,7 @@ let
       defaultRatesJsonPath = "${ratesPkg}/share/rates.json";
 
       lookupRate = { currency, rates ? null, ratePath ? defaultRatesJsonPath }:
+        if currency == "EUR" then 1.0 else
         let table = if rates != null then rates else rateTableFromFile ratePath;
         in if builtins.hasAttr currency table
         then builtins.getAttr currency table
