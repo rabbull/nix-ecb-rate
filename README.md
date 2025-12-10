@@ -99,3 +99,7 @@ To update to today's rates:
 3.  Update `default.nix`:
     - Set `expectedDate` to today's date (YYYY-MM-DD).
     - Update `ratesHash` with the new hash.
+
+## Reference
+
+XML Parser used in this project is a modified version of (kanwren/nix-parsec)[https://github.com/kanwren/nix-parsec/pull/6].
