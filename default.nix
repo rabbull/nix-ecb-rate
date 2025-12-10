@@ -1,14 +1,15 @@
 let
   mkEnv =
     { pkgs ? import <nixpkgs> {}
+    , src ? builtins.path { path = ./.; name = "ecb-fx-src"; }
     , expectedDate ? "2025-12-05"
     , ratesUrl ? "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
     , ratesHash ? "sha256-qDIKv7rg+naM0pfZghEsE56e+g0CjNNt51M5ObhGAb4="
     }:
     let
-      xmlParser = import ./xml/parse-xml.nix { inherit pkgs; };
+      xmlDir = src + "/xml";
+      xmlParser = import (xmlDir + "/parse-xml.nix") { inherit pkgs; };
 
-      # Fetch and parse ECB XML once (pure Nix)
       source = pkgs.fetchurl { url = ratesUrl; hash = ratesHash; };
       xmlContent = builtins.readFile source;
 
@@ -36,23 +37,6 @@ let
         then throw "Date mismatch: expected ${expectedDate}, got ${dateFromXml}"
         else null;
 
-      chfNode = findOneBy {
-        nodes = getTags datedCube.children;
-        predicate = n: (n.attributes or {}) ? currency && n.attributes.currency == "CHF";
-        err = "CHF rate missing in XML";
-      };
-
-      chfRateStr = chfNode.attributes.rate;
-
-      rateFile = pkgs.writeText "rate-${dateFromXml}.txt" chfRateStr;
-      dateFile = pkgs.writeText "date-${dateFromXml}.txt" dateFromXml;
-
-      ratesPkg = pkgs.linkFarm "ecb-rates-${dateFromXml}" [
-        { name = "share/eurofxref.xml"; path = source; }
-        { name = "share/rate.txt"; path = rateFile; }
-        { name = "share/date.txt"; path = dateFile; }
-      ];
-
       toNumber = x: if builtins.isString x then builtins.fromJSON x else x;
       toInt = x: if builtins.isString x then builtins.fromJSON x else x;
       pow10 = n: if n <= 0 then 1.0 else 10.0 * pow10 (n - 1);
@@ -61,48 +45,76 @@ let
         in (builtins.floor (value * factor + 0.5)) / factor;
       maybeRound = digits: value: if digits == null then value else roundTo digits value;
 
+      currencyNodes = builtins.filter
+        (n: (n.attributes or {}) ? currency && (n.attributes or {}) ? rate)
+        (getTags datedCube.children);
+
+      _currencyNodesCheck = if currencyNodes == [] then throw "No currency rates found in ECB XML" else null;
+
+      ratesAttr = builtins.listToAttrs (builtins.map
+        (n: { name = n.attributes.currency; value = toNumber n.attributes.rate; })
+        currencyNodes);
+
+      rateFor = currency:
+        if builtins.hasAttr currency ratesAttr
+        then builtins.getAttr currency ratesAttr
+        else throw "Currency ${currency} not found in ECB data";
+
+
+      ratesJsonFile = pkgs.writeText "rates-${dateFromXml}.json" (builtins.toJSON ratesAttr);
+      dateFile = pkgs.writeText "date-${dateFromXml}.txt" dateFromXml;
+
+      ratesPkg = pkgs.linkFarm "ecb-rates-${dateFromXml}" [
+        { name = "share/eurofxref.xml"; path = source; }
+
+        { name = "share/rates.json"; path = ratesJsonFile; }
+        { name = "share/date.txt"; path = dateFile; }
+      ];
+
       trim = s: pkgs.lib.strings.trim s;
-      rateFromFile = path: builtins.fromJSON (trim (builtins.readFile path));
 
-      defaultRatePath = "${ratesPkg}/share/rate.txt";
+      rateTableFromFile = path: builtins.fromJSON (trim (builtins.readFile path));
 
-      chfToEur = { amount, ratePath ? defaultRatePath, rate ? null, digits ? null }:
+
+      defaultRatesJsonPath = "${ratesPkg}/share/rates.json";
+
+      lookupRate = { currency, rates ? null, ratePath ? defaultRatesJsonPath }:
+        let table = if rates != null then rates else rateTableFromFile ratePath;
+        in if builtins.hasAttr currency table
+        then builtins.getAttr currency table
+        else throw "Currency ${currency} not found in ECB rates table";
+
+      convert = { amount, from, to, rates ? null, ratePath ? defaultRatesJsonPath, digits ? null }:
         let
           digitsVal = if digits == null then null else toInt digits;
-          r = if rate != null then toNumber rate else rateFromFile ratePath;
+          table = if rates != null then rates else rateTableFromFile ratePath;
+          fromRate = lookupRate { currency = from; rates = table; ratePath = ratePath; };
+          toRate = lookupRate { currency = to; rates = table; ratePath = ratePath; };
           amt = toNumber amount;
-        in maybeRound digitsVal (amt / r);
-
-      eurToChf = { amount, ratePath ? defaultRatePath, rate ? null, digits ? null }:
-        let
-          digitsVal = if digits == null then null else toInt digits;
-          r = if rate != null then toNumber rate else rateFromFile ratePath;
-          amt = toNumber amount;
-        in maybeRound digitsVal (amt * r);
+        in maybeRound digitsVal ((amt / fromRate) * toRate);
 
       formatValue = { value, digits ? null }:
         let digitsVal = if digits == null then null else toInt digits;
         in builtins.toString (maybeRound digitsVal value);
 
       lib = {
-        inherit rateFromFile chfToEur eurToChf pow10 roundTo maybeRound formatValue;
+        inherit rateTableFromFile rateFor convert pow10 roundTo maybeRound formatValue;
         rates = {
           package = ratesPkg;
-          ratePath = "${ratesPkg}/share/rate.txt";
+
+          ratesPath = "${ratesPkg}/share/rates.json";
           datePath = "${ratesPkg}/share/date.txt";
           xmlPath = source;
           version = dateFromXml;
           url = ratesUrl;
           hash = ratesHash;
           date = dateFromXml;
+          currencies = builtins.attrNames ratesAttr;
+          table = ratesAttr;
         };
         cli = {
-          chfToEur = args: formatValue {
-            value = chfToEur args;
-            digits = if args ? digits then args.digits else 4;
-          };
-          eurToChf = args: formatValue {
-            value = eurToChf args;
+          convert = args: formatValue {
+            value = convert args;
             digits = if args ? digits then args.digits else 4;
           };
         };
